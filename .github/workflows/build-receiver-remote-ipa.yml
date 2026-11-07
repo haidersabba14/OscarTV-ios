@@ -1,0 +1,45 @@
+name: Build Receiver Remote IPA
+
+on:
+  push:
+    branches: [codex/receiver-remote-ipa]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ReceiverRemote
+        run: xcodegen generate --spec project.yml
+      - name: Build iPhone app and package IPA
+        working-directory: ReceiverRemote
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ReceiverRemote.xcodeproj \
+            -scheme ReceiverRemote \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          mkdir Payload
+          cp -R 'build/DerivedData/Build/Products/Release-iphoneos/Receiver Remote.app' Payload/
+          zip -qr Receiver-Remote.ipa Payload
+          unzip -t Receiver-Remote.ipa
+          test -f Payload/'Receiver Remote.app'/Info.plist
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Receiver-Remote-IPA
+          path: ReceiverRemote/Receiver-Remote.ipa
+          if-no-files-found: error
