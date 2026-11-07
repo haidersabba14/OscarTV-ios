@@ -16,6 +16,19 @@ targets:
       - Sources
     info:
       path: Info.plist
+      properties:
+        CFBundleDisplayName: Receiver Remote
+        CFBundleShortVersionString: "1.1"
+        CFBundleVersion: "3"
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [arm64]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+        NSLocalNetworkUsageDescription: يستخدم التطبيق الشبكة المحلية لاكتشاف الرسيفر والتحكم به بعد الاقتران.
+        NSBonjourServices: [_ctvremote._tcp]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gathin.receiverremote
