@@ -1,0 +1,64 @@
+name: Review Receiver Remote Interface
+
+on:
+  push:
+    branches: [codex/receiver-full-redesign]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ReceiverRemote
+        run: xcodegen generate --spec project.yml
+      - name: Select simulator
+        working-directory: ReceiverRemote
+        run: |
+          xcrun simctl list devices available -j > devices.json
+          DEVICE_ID=$(python3 -c 'import json; d=json.load(open("devices.json")); phones=[x for v in d["devices"].values() for x in v if "iPhone" in x["name"]]; preferred=[x for x in phones if x["name"]=="iPhone 16 Pro"]; print((preferred or phones)[0]["udid"])')
+          export DEVICE_ID
+          echo "DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID" || true
+          python3 -c 'import os,subprocess; subprocess.run(["xcrun","simctl","bootstatus",os.environ["DEVICE_ID"],"-b"], timeout=180, check=True)' 
+          xcrun simctl status_bar "$DEVICE_ID" override --time '9:41' --batteryState charged --batteryLevel 100
+      - name: Build and test redesigned interface
+        working-directory: ReceiverRemote
+        run: |
+          xcodebuild -project ReceiverRemote.xcodeproj -scheme ReceiverRemote \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath build/Simulator -resultBundlePath build/InterfaceTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO test > build-simulator.log 2>&1 || { tail -140 build-simulator.log; exit 1; }
+      - name: Capture real simulator screens
+        if: always()
+        working-directory: ReceiverRemote
+        run: |
+          set -euo pipefail
+          APP='build/Simulator/Build/Products/Debug-iphonesimulator/Receiver Remote.app'
+          test -d "$APP"
+          mkdir -p Screenshots
+          xcrun simctl install "$DEVICE_ID" "$APP"
+          for SCREEN in remote numbers connection pairing; do
+            xcrun simctl terminate "$DEVICE_ID" com.gathin.receiverremote || true
+            xcrun simctl launch "$DEVICE_ID" com.gathin.receiverremote "--capture-$SCREEN"
+            sleep 3
+            xcrun simctl io "$DEVICE_ID" screenshot "Screenshots/$SCREEN.png"
+          done
+      - name: Upload previews and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Receiver-Remote-Intel-Review
+          path: |
+            ReceiverRemote/Screenshots
+            ReceiverRemote/build-simulator.log
+            ReceiverRemote/build/InterfaceTests.xcresult
+            ReceiverRemote/devices.json
+          if-no-files-found: warn
