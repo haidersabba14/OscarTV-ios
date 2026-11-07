@@ -501,8 +501,8 @@ private struct DirectionalDial: View {
                             DialSector(start: direction.start).stroke(.white.opacity(0.055), lineWidth: 0.7)
                             Image(systemName: direction.symbol).font(.system(size: 20, weight: .light))
                                 .foregroundStyle(enabled ? Atelier.paleGold : .white.opacity(0.24))
-                                .position(x: side / 2 + cos(direction.angle) * side * 0.365,
-                                          y: side / 2 + sin(direction.angle) * side * 0.365)
+                                .position(x: side / 2 + cos(CGFloat(direction.angle)) * side * 0.365,
+                                          y: side / 2 + sin(CGFloat(direction.angle)) * side * 0.365)
                         }
                         .contentShape(DialSector(start: direction.start))
                     }
@@ -545,7 +545,7 @@ private struct DialSector: Shape {
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let outside = min(rect.width, rect.height) * 0.49
         let inside = min(rect.width, rect.height) * 0.215
-        let a = start * .pi / 180
+        let a = CGFloat(start * Double.pi / 180)
         var path = Path()
         path.move(to: CGPoint(x: center.x + cos(a) * inside, y: center.y + sin(a) * inside))
         path.addLine(to: CGPoint(x: center.x + cos(a) * outside, y: center.y + sin(a) * outside))
