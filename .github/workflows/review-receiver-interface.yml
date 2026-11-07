@@ -3,6 +3,10 @@ name: Review Receiver Remote Interface
 on:
   push:
     branches: [codex/receiver-full-redesign]
+    paths:
+      - 'ReceiverRemote/Sources/**'
+      - 'ReceiverRemote/UITests/**'
+      - 'ReceiverRemote/project.yml'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +31,7 @@ jobs:
           export DEVICE_ID
           echo "DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE_ID" || true
-          python3 -c 'import os,subprocess; subprocess.run(["xcrun","simctl","bootstatus",os.environ["DEVICE_ID"],"-b"], timeout=180, check=True)' 
+          python3 -c 'import os,subprocess; subprocess.run(["xcrun","simctl","bootstatus",os.environ["DEVICE_ID"],"-b"], timeout=180, check=True)'
           xcrun simctl status_bar "$DEVICE_ID" override --time '9:41' --batteryState charged --batteryLevel 100
       - name: Build and test redesigned interface
         working-directory: ReceiverRemote

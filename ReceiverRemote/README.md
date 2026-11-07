@@ -1,6 +1,6 @@
 # Receiver Remote for iPhone
 
-This black-and-gold iPhone app talks to a compatible CleanYourTV receiver service over Wi-Fi. It discovers `_ctvremote._tcp` with Bonjour and also accepts a manual IP address. The receiver service must already be installed; this iOS repository branch contains the phone app and its build workflow, not the Android receiver update.
+This ivory, charcoal and champagne iPhone app talks to a compatible CleanYourTV receiver service over Wi-Fi. It discovers `_ctvremote._tcp` with Bonjour and also accepts a manual IP address. The receiver service must already be installed; this iOS repository branch contains the phone app and its build workflow, not the Android receiver update.
 
 ## First pairing
 
@@ -24,3 +24,12 @@ The launcher is an Android home app, not receiver firmware. Android has no gener
 
 The `Build Receiver Remote IPA` workflow runs on pushes to `codex/receiver-remote-ipa` and can also be started from **Actions → Run workflow**. It creates an unsigned `Receiver-Remote.ipa` and uploads it as the `Receiver-Remote-IPA` artifact. Download the artifact ZIP from the workflow run and extract the IPA. As in the earlier iOS project, the IPA is unsigned; sign it with Sideloadly or an Apple certificate before installing it on an iPhone.
 
+
+
+## Redesigned interface
+
+The Control tab contains the circular direction dial, OK, Home, Back, volume, mute, wake and Android power-menu controls. The Numbers tab retains the number and channel controls and their original capability gates. The Connection tab contains refresh, device information and unpairing. Bonjour discovery, manual IP entry, six-digit pairing, bearer-token handling and Keychain storage retain their existing implementations. The direction dial uses fixed physical positions independent of Arabic text layout.
+
+As requested, the Settings button now targets IPTV Smarters Pro on the Android receiver. This requires an updated receiver service; see [the receiver integration contract](IPTV-Receiver-Integration.md). Older services display a clear update requirement. The phone does not claim to launch the receiver app without server support.
+
+The full-redesign branch builds an unsigned IPA. The separately bounded Intel simulator review tests physical direction taps, command bindings, capability gates, pairing access and the legacy-receiver IPTV requirement. Simulator fixture switches are compiled only into Debug simulator builds. The distributed Release build has no fixture state or command interception. The user's icon and suggested receiver IP are applied locally when preparing the delivered IPA.
