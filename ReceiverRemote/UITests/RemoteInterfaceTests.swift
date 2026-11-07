@@ -13,6 +13,7 @@ final class RemoteInterfaceTests: XCTestCase {
             dial.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y)).tap()
             XCTAssertEqual(result.label, command)
         }
+        app.swipeUp()
         app.buttons["الرئيسية"].tap()
         XCTAssertEqual(result.label, "HOME")
         app.buttons["رجوع"].tap()
@@ -27,20 +28,46 @@ final class RemoteInterfaceTests: XCTestCase {
         app.launchArguments = ["--capture-remote"]
         app.launch()
         XCTAssertTrue(app.buttons["الإعدادات"].waitForExistence(timeout: 10))
+        app.swipeUp()
         app.buttons["الإعدادات"].tap()
         XCTAssertTrue(app.staticTexts["فتح IPTV Smarters Pro يحتاج تحديث خدمة التحكم على الرسيفر"].waitForExistence(timeout: 5))
     }
 
     @MainActor
-    func testNumbersKeepReceiverCapabilityGates() {
+    func testNumberPadIsRemovedAndPreferencesPersist() {
         let app = XCUIApplication()
         app.launchArguments = ["--capture-remote", "--ui-test"]
         app.launch()
-        app.buttons["tab-number"].tap()
-        XCTAssertTrue(app.buttons["1"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["1"].isEnabled)
-        XCTAssertFalse(app.buttons["القناة السابقة"].isEnabled)
-        XCTAssertFalse(app.buttons["القناة التالية"].isEnabled)
+        XCTAssertFalse(app.buttons["tab-number"].exists)
+        app.buttons["tab-slider.horizontal.3"].tap()
+        let haptics = app.switches["preference-haptics"]
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        let oldValue = haptics.value as? String
+        haptics.tap()
+        let changedValue = haptics.value as? String
+        XCTAssertNotEqual(changedValue, oldValue)
+        app.terminate()
+        app.launch()
+        app.buttons["tab-slider.horizontal.3"].tap()
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertEqual(haptics.value as? String, changedValue)
+        haptics.tap()
+        XCTAssertFalse(app.buttons["1"].exists)
+        XCTAssertTrue(app.buttons["اختبار الاتصال"].exists)
+    }
+
+    @MainActor
+    func testVolumeHoldUsesRepeatedCommands() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--capture-remote", "--ui-test"]
+        app.launch()
+        app.swipeUp()
+        let volumeUp = app.buttons["رفع الصوت"]
+        XCTAssertTrue(volumeUp.waitForExistence(timeout: 5))
+        volumeUp.press(forDuration: 1.2)
+        let result = app.staticTexts["captured-command"]
+        XCTAssertEqual(result.label, "VOLUME_UP")
+        XCTAssertGreaterThanOrEqual(Int(result.value as? String ?? "0") ?? 0, 2)
     }
 
     @MainActor

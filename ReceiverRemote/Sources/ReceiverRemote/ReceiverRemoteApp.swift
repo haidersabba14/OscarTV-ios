@@ -9,7 +9,7 @@ struct ReceiverRemoteApp: App {
         #if DEBUG
         // Simulator-only capture fixtures never run in the distributed iPhone build.
         #if targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("--capture-remote") || ProcessInfo.processInfo.arguments.contains("--capture-numbers") || ProcessInfo.processInfo.arguments.contains("--capture-connection") {
+        if ProcessInfo.processInfo.arguments.contains("--capture-remote") || ProcessInfo.processInfo.arguments.contains("--capture-more") || ProcessInfo.processInfo.arguments.contains("--capture-connection") {
             instance.selected = ReceiverEndpoint(name: "CleanYourTV", host: "192.168.1.10", port: 8765)
             instance.paired = true
             instance.message = "متصل بالرسيفر"

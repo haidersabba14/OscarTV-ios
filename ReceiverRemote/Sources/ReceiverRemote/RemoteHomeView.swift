@@ -1,4 +1,6 @@
 import SwiftUI
+import UIKit
+import RemoteInteractionCore
 
 private enum Atelier {
     static let paper = Color(red: 0.96, green: 0.95, blue: 0.92)
@@ -11,11 +13,11 @@ private enum Atelier {
 }
 
 private enum RemotePage: String, CaseIterable {
-    case remote = "التحكم", numbers = "الأرقام", connection = "الاتصال"
+    case remote = "التحكم", more = "المزيد", connection = "الاتصال"
     var symbol: String {
         switch self {
         case .remote: return "appletvremote.gen4"
-        case .numbers: return "number"
+        case .more: return "slider.horizontal.3"
         case .connection: return "wifi"
         }
     }
@@ -25,9 +27,17 @@ struct RemoteHomeView: View {
     @ObservedObject var store: RemoteStore
     @State private var page: RemotePage = .remote
     @State private var manualHost = ""
+    @AppStorage("remote.haptics.enabled") private var hapticsEnabled = true
+    @AppStorage("remote.keepAwake.enabled") private var keepAwake = false
+    @AppStorage("remote.shortcuts") private var shortcutStorage = "HOME,MUTE,WAKE"
+    @State private var editingShortcuts = false
+    @State private var choosingShortcut = false
+    @State private var shortcutSlot = 0
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG
     @State private var capturedAction = ""
+    @State private var capturedCommandCount = 0
     #endif
 
     var body: some View {
@@ -40,7 +50,7 @@ struct RemoteHomeView: View {
                         deviceSummary
                         switch page {
                         case .remote: remoteWorkspace
-                        case .numbers: numbersWorkspace
+                        case .more: moreWorkspace
                         case .connection: connectionWorkspace
                         }
                     } else {
@@ -55,6 +65,7 @@ struct RemoteHomeView: View {
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
+            .refreshable { if store.paired { await store.refreshCapabilities() } }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if store.paired { navigationDock }
@@ -64,19 +75,39 @@ struct RemoteHomeView: View {
             #if targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--ui-test") {
                 Text(capturedAction).accessibilityIdentifier("captured-command")
+                    .accessibilityValue(String(capturedCommandCount))
                     .font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
             }
             #endif
             #endif
         }
         .preferredColorScheme(.light)
-        .onChange(of: store.paired) { _, _ in page = .remote }
+        .onChange(of: store.paired) { _, _ in
+            page = .remote
+            updateIdleTimer()
+        }
+        .onChange(of: keepAwake) { _, _ in updateIdleTimer() }
+        .onChange(of: scenePhase) { _, _ in updateIdleTimer() }
+        .onChange(of: page) { _, value in if value != .remote { editingShortcuts = false } }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .confirmationDialog("اختر الاختصار", isPresented: $choosingShortcut, titleVisibility: .visible) {
+            ForEach(RemoteShortcut.allCases.filter(shortcutAvailable)) { shortcut in
+                Button(shortcut.title) {
+                    var selection = ShortcutSelection(storage: shortcutStorage)
+                    selection.replace(slot: shortcutSlot, with: shortcut)
+                    shortcutStorage = selection.storage
+                    pressFeedback()
+                }
+            }
+            Button("إلغاء", role: .cancel) {}
+        }
         .onAppear {
+            updateIdleTimer()
             if manualHost.isEmpty {
                 manualHost = Bundle.main.object(forInfoDictionaryKey: "ReceiverSuggestedHost") as? String ?? ""
             }
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--capture-numbers") { page = .numbers }
+            if ProcessInfo.processInfo.arguments.contains("--capture-more") { page = .more }
             if ProcessInfo.processInfo.arguments.contains("--capture-connection") { page = .connection }
             #endif
         }
@@ -119,7 +150,7 @@ struct RemoteHomeView: View {
                         .lineLimit(2).multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 4)
-                Circle().fill(Color(red: 0.30, green: 0.57, blue: 0.40)).frame(width: 7, height: 7)
+                Circle().fill(connectionColor).frame(width: 7, height: 7)
                 Image(systemName: "chevron.forward").font(.system(size: 10, weight: .bold)).foregroundStyle(Atelier.muted)
             }
             .padding(14).paperSurface(radius: 23)
@@ -130,6 +161,7 @@ struct RemoteHomeView: View {
 
     private var remoteWorkspace: some View {
         VStack(spacing: 18) {
+            shortcutBar
             VStack(spacing: 25) {
                 HStack {
                     Text("لوحة التحكّم").font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.9))
@@ -205,12 +237,62 @@ struct RemoteHomeView: View {
     }
 
     private func soundKey(_ symbol: String, label: String, action: String) -> some View {
-        Button { send(action) } label: {
+        RepeatingControl(enabled: store.capabilities.volume, label: label,
+                         onPress: pressFeedback, action: { await performAction(action) }) {
             Image(systemName: symbol).font(.system(size: 18, weight: .medium))
                 .foregroundStyle(store.capabilities.volume ? Atelier.paleGold : .white.opacity(0.28))
                 .frame(width: 44, height: 44).contentShape(Circle())
         }
-        .buttonStyle(QuietPressStyle()).disabled(!store.capabilities.volume).accessibilityLabel(label)
+        .accessibilityHint("اضغط مطولًا للتكرار")
+    }
+
+    private var shortcutBar: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Label("اختصاراتك", systemImage: "star").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Atelier.ink)
+                Spacer()
+                Button(editingShortcuts ? "تم" : "تعديل") { editingShortcuts.toggle() }
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Atelier.muted)
+                    .frame(minWidth: 44, minHeight: 32).accessibilityIdentifier("edit-shortcuts")
+            }
+            HStack(spacing: 10) {
+                ForEach(Array(ShortcutSelection(storage: shortcutStorage).actions.enumerated()), id: \.offset) { index, shortcut in
+                    Button {
+                        if editingShortcuts {
+                            shortcutSlot = index
+                            choosingShortcut = true
+                        } else { send(shortcut.rawValue) }
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: editingShortcuts ? "pencil" : shortcut.symbol)
+                                .font(.system(size: 19, weight: .light))
+                            Text(shortcut.title).font(.system(size: 10, weight: .medium))
+                                .lineLimit(1).minimumScaleFactor(0.75)
+                        }
+                        .foregroundStyle(Atelier.ink)
+                        .frame(maxWidth: .infinity, minHeight: 68).paperSurface(radius: 22)
+                        .opacity(editingShortcuts || shortcutAvailable(shortcut) ? 1 : 0.35)
+                    }
+                    .buttonStyle(QuietPressStyle())
+                    .disabled(!editingShortcuts && !shortcutAvailable(shortcut))
+                    .accessibilityLabel("اختصار \(shortcut.title)")
+                    .accessibilityIdentifier("shortcut-\(index)")
+                }
+            }
+        }
+    }
+
+    private func shortcutAvailable(_ shortcut: RemoteShortcut) -> Bool {
+        guard store.paired else { return false }
+        switch shortcut {
+        case .home: return store.capabilities.home
+        case .back: return store.capabilities.back
+        case .mute, .volumeUp, .volumeDown: return store.capabilities.volume
+        case .wake: return true
+        case .powerMenu: return store.capabilities.powerMenu
+        case .iptv: return store.capabilities.openIPTVSmarters
+        }
     }
 
     private func featureTile(_ title: String, detail: String, symbol: String, action: String, enabled: Bool) -> some View {
@@ -228,34 +310,84 @@ struct RemoteHomeView: View {
         .buttonStyle(QuietPressStyle()).disabled(!enabled).accessibilityLabel(title)
     }
 
-    private var numbersWorkspace: some View {
+    private var moreWorkspace: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sectionHeading("الأرقام والقنوات", detail: "كل أرقامك، في مكان واحد", serial: "02")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
-                ForEach(["1", "2", "3", "4", "5", "6", "7", "8", "9", "•", "0", "⌫"], id: \.self) { digit in
-                    if digit == "•" || digit == "⌫" {
-                        Text(digit).font(.system(size: 24, weight: .light))
-                            .foregroundStyle(Atelier.muted.opacity(0.3))
-                            .frame(maxWidth: .infinity, minHeight: 72).paperSurface(radius: 25)
-                            .accessibilityHidden(true)
-                    } else {
-                        Button { send("DIGIT_\(digit)") } label: {
-                            Text(digit).font(.system(size: 31, weight: .light, design: .rounded))
-                                .foregroundStyle(Atelier.ink.opacity(store.capabilities.channels ? 1 : 0.35))
-                                .frame(maxWidth: .infinity, minHeight: 72).paperSurface(radius: 25)
-                        }
-                        .buttonStyle(QuietPressStyle()).disabled(!store.capabilities.channels)
-                    }
+            sectionHeading("تحكّم يناسبك", detail: "تفاصيل صغيرة، وراحة أكثر", serial: "02")
+            VStack(spacing: 0) {
+                Toggle(isOn: $hapticsEnabled) {
+                    preferenceLabel("اهتزاز الأزرار", detail: "إحساس خفيف مع كل ضغطة", symbol: "hand.tap")
+                }
+                .accessibilityIdentifier("preference-haptics").padding(19)
+                Divider().padding(.horizontal, 19)
+                Toggle(isOn: $keepAwake) {
+                    preferenceLabel("إبقاء الشاشة مفتوحة", detail: "أثناء استخدام التطبيق مع الرسيفر", symbol: "sun.max")
+                }
+                .accessibilityIdentifier("preference-keep-awake").padding(19)
+            }
+            .tint(Atelier.gold).paperSurface(radius: 27)
+            informationNote("اضغط مطولًا على زر رفع الصوت أو خفضه للتغيير المستمر. يتوقف التكرار عند رفع إصبعك أو مغادرة التطبيق.", symbol: "hand.point.up.left")
+            Button {
+                page = .remote
+                editingShortcuts = true
+            } label: {
+                Label("تخصيص الاختصارات", systemImage: "star")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Atelier.ink)
+                    .frame(maxWidth: .infinity, minHeight: 53).background(Atelier.metal, in: Capsule())
+            }
+            .buttonStyle(QuietPressStyle())
+            connectionCheckCard
+        }
+    }
+
+    private func preferenceLabel(_ title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 21, weight: .light))
+                .foregroundStyle(Atelier.gold).frame(width: 30)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Atelier.ink)
+                Text(detail).font(.system(size: 10)).foregroundStyle(Atelier.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var connectionCheckCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Circle().fill(connectionColor).frame(width: 7, height: 7)
+                Text(store.connectionState.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Atelier.ink)
+                Spacer()
+                if let milliseconds = store.lastResponseMilliseconds {
+                    Text("\(milliseconds) ms").font(.system(size: 12, design: .monospaced)).foregroundStyle(Atelier.muted)
                 }
             }
-            .environment(\.layoutDirection, .leftToRight)
-            HStack(spacing: 12) {
-                featureTile("القناة السابقة", detail: "CH −", symbol: "minus", action: "CHANNEL_DOWN", enabled: store.capabilities.channels)
-                featureTile("القناة التالية", detail: "CH +", symbol: "plus", action: "CHANNEL_UP", enabled: store.capabilities.channels)
+            if let lastContact = store.lastSuccessfulContact {
+                Text("آخر تواصل ناجح: \(lastContact.formatted(date: .omitted, time: .shortened))")
+                    .font(.system(size: 11)).foregroundStyle(Atelier.muted)
             }
-            if !store.capabilities.channels {
-                informationNote("الأرقام وتغيير القنوات غير متاحين لهذا الرسيفر. تظهر الأزرار مفعّلة عند دعمها من نظام الجهاز.", symbol: "info.circle")
+            Button { Task { await store.refreshCapabilities() } } label: {
+                HStack(spacing: 9) {
+                    if store.checkingConnection { ProgressView().tint(Atelier.ink) }
+                    Text(store.checkingConnection ? "جارٍ الفحص…" : "اختبار الاتصال")
+                    Image(systemName: "wave.3.right")
+                }
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(Atelier.ink)
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .background(Atelier.paper, in: Capsule())
             }
+            .buttonStyle(QuietPressStyle()).disabled(store.checkingConnection)
+            Text("زمن الاستجابة يخص آخر فحص للشبكة، وقد يختلف وقت تنفيذ الأوامر.")
+                .font(.system(size: 10)).foregroundStyle(Atelier.muted)
+        }
+        .padding(19).paperSurface(radius: 26)
+    }
+
+    private var connectionColor: Color {
+        switch store.connectionState {
+        case .available: return Color(red: 0.30, green: 0.57, blue: 0.40)
+        case .unavailable: return Color(red: 0.72, green: 0.34, blue: 0.27)
+        case .checking: return Atelier.gold
+        case .unknown: return Atelier.muted
         }
     }
 
@@ -270,12 +402,13 @@ struct RemoteHomeView: View {
                 connectionRow("نوع الاتصال", value: "Wi-Fi محلي", symbol: "wifi")
             }
             .paperSurface(radius: 27)
+            connectionCheckCard
             Button { Task { await store.refreshCapabilities() } } label: {
                 Label("تحديث الاتصال", systemImage: "arrow.clockwise")
                     .font(.system(size: 15, weight: .semibold)).foregroundStyle(Atelier.ink)
                     .frame(maxWidth: .infinity, minHeight: 54).background(Atelier.metal, in: Capsule())
             }
-            .buttonStyle(QuietPressStyle())
+            .buttonStyle(QuietPressStyle()).disabled(store.checkingConnection)
             Button { store.unpair() } label: {
                 Label("إلغاء الاقتران", systemImage: "link.badge.minus")
                     .font(.system(size: 14, weight: .medium)).foregroundStyle(Atelier.muted)
@@ -470,23 +603,38 @@ struct RemoteHomeView: View {
         .padding(.top, 6).accessibilityElement(children: .combine)
     }
 
+    private func pressFeedback() {
+        guard hapticsEnabled else { return }
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.65)
+    }
+
+    private func updateIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = keepAwake && store.paired && scenePhase == .active
+    }
+
     private func send(_ action: String) {
+        pressFeedback()
+        Task { await performAction(action) }
+    }
+
+    @discardableResult
+    private func performAction(_ action: String) async -> Bool {
         #if DEBUG
         #if targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("--ui-test") {
             capturedAction = action
-            return
+            capturedCommandCount += 1
+            return true
         }
         #endif
         #endif
-        Task {
-            if action == "OPEN_IPTV_SMARTERS_PRO" {
-                await store.openIPTVSmarters()
-            } else {
-                await store.send(action)
-            }
+        if action == "OPEN_IPTV_SMARTERS_PRO" {
+            await store.openIPTVSmarters()
+            return store.capabilities.openIPTVSmarters
         }
+        return await store.send(action)
     }
+
 }
 
 private struct DirectionalDial: View {
@@ -576,5 +724,69 @@ private extension View {
     func paperSurface(radius: CGFloat) -> some View {
         background(.white.opacity(0.76), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Atelier.line.opacity(0.5), lineWidth: 0.8))
+    }
+}
+
+/// A touch starts exactly one worker. Leaving the button, lifting the finger,
+/// disabling the control or leaving the active app all stop future repeats.
+@MainActor
+private struct RepeatingControl<Content: View>: View {
+    let enabled: Bool
+    let label: String
+    let onPress: () -> Void
+    let action: @MainActor () async -> Bool
+    let content: Content
+    @State private var repeater = CommandRepeater()
+    @State private var trackingTouch = false
+    @State private var pressed = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    init(enabled: Bool, label: String, onPress: @escaping () -> Void,
+         action: @escaping @MainActor () async -> Bool, @ViewBuilder content: () -> Content) {
+        self.enabled = enabled
+        self.label = label
+        self.onPress = onPress
+        self.action = action
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .opacity(pressed ? 0.65 : 1)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard enabled, scenePhase == .active else { return }
+                    if !trackingTouch {
+                        trackingTouch = true
+                        pressed = true
+                        onPress()
+                        repeater.begin(action: action)
+                    }
+                    if abs(value.translation.width) > 32 || abs(value.translation.height) > 32 {
+                        pressed = false
+                        repeater.stop()
+                    }
+                }
+                .onEnded { _ in stop() })
+            .allowsHitTesting(enabled)
+            .disabled(!enabled)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                guard enabled else { return }
+                onPress()
+                Task { await action() }
+            }
+            .onDisappear { stop() }
+            .onChange(of: enabled) { _, active in if !active { stop() } }
+            .onChange(of: scenePhase) { _, phase in if phase != .active { stop() } }
+    }
+
+    private func stop() {
+        repeater.stop()
+        trackingTouch = false
+        pressed = false
     }
 }

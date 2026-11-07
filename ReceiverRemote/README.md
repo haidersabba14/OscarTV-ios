@@ -28,8 +28,17 @@ The `Build Receiver Remote IPA` workflow runs on pushes to `codex/receiver-remot
 
 ## Redesigned interface
 
-The Control tab contains the circular direction dial, OK, Home, Back, volume, mute, wake and Android power-menu controls. The Numbers tab retains the number and channel controls and their original capability gates. The Connection tab contains refresh, device information and unpairing. Bonjour discovery, manual IP entry, six-digit pairing, bearer-token handling and Keychain storage retain their existing implementations. The direction dial uses fixed physical positions independent of Arabic text layout.
+The Control tab contains the circular direction dial, OK, Home, Back, volume, mute, wake and Android power-menu controls. The number keypad and its tab have been removed. The More tab contains haptic feedback, keeping the screen awake while actively controlling a paired receiver, shortcut customization, and a connection check with response timing. The Connection tab contains refresh, device information and unpairing. Bonjour discovery, manual IP entry, six-digit pairing, bearer-token handling and Keychain storage retain their existing implementations. The direction dial uses fixed physical positions independent of Arabic text layout.
 
 As requested, the Settings button now targets IPTV Smarters Pro on the Android receiver. This requires an updated receiver service; see [the receiver integration contract](IPTV-Receiver-Integration.md). Older services display a clear update requirement. The phone does not claim to launch the receiver app without server support.
 
 The full-redesign branch builds an unsigned IPA. The separately bounded Intel simulator review tests physical direction taps, command bindings, capability gates, pairing access and the legacy-receiver IPTV requirement. Simulator fixture switches are compiled only into Debug simulator builds. The distributed Release build has no fixture state or command interception. The user's icon and suggested receiver IP are applied locally when preparing the delivered IPA.
+
+
+## Version 1.2 controls
+
+Three persistent shortcuts are selected from commands supported by the paired receiver. Choosing an already selected shortcut swaps its position instead of creating a duplicate. Unknown stored command names are discarded. Volume buttons send once on touch and repeat while held, with one request in flight per hold. Release, dragging away, losing the active scene, a disabled capability or a failed receiver response stops future repeats. Releasing does not abort a request already sent.
+
+Haptics and the keep-awake preference persist locally. Keep-awake only applies while the paired app is active, and is reset on backgrounding, unpairing, leaving the view or disabling the preference. Connection diagnostics reuse `/v1/info`; no new server endpoint is required. The existing IPTV launch capability guard is unchanged.
+
+`swift test --package-path Core` runs the interaction and shortcut tests on the macOS build host without requiring an iOS Simulator. The IPA workflow also compiles the simulator app and UI tests. Simulator execution is a separate manual review because startup was unavailable in this environment; compile success is not a claim that UI tests ran.

@@ -26,6 +26,18 @@ struct RemoteCapabilities {
     }
 }
 
+enum ReceiverConnectionState {
+    case unknown, checking, available, unavailable
+    var title: String {
+        switch self {
+        case .unknown: return "لم يُفحص الاتصال بعد"
+        case .checking: return "جارٍ فحص الاتصال"
+        case .available: return "آخر اتصال ناجح"
+        case .unavailable: return "تعذّر الاتصال بالرسيفر"
+        }
+    }
+}
+
 @MainActor
 final class RemoteStore: ObservableObject {
     @Published var discovery = ReceiverDiscovery()
@@ -35,6 +47,10 @@ final class RemoteStore: ObservableObject {
     @Published var capabilities = RemoteCapabilities()
     @Published var message = "ابحث عن الرسيفر على شبكة Wi-Fi نفسها"
     @Published var busy = false
+    @Published private(set) var connectionState: ReceiverConnectionState = .unknown
+    @Published private(set) var lastResponseMilliseconds: Int?
+    @Published private(set) var lastSuccessfulContact: Date?
+    @Published private(set) var checkingConnection = false
 
     private let defaults = UserDefaults.standard
     private var discoveryCancellable: AnyCancellable?
@@ -81,6 +97,8 @@ final class RemoteStore: ObservableObject {
             paired = true
             pairingCode = ""
             capabilities = RemoteCapabilities(response["capabilities"] as? [String: Any] ?? [:])
+            connectionState = .available
+            lastSuccessfulContact = Date()
             message = "تم الاقتران بالرسيفر"
         } catch {
             if let remoteError = error as? RemoteError, case .unauthorized = remoteError {
@@ -96,16 +114,30 @@ final class RemoteStore: ObservableObject {
         token = ""
         paired = false
         capabilities = RemoteCapabilities()
+        connectionState = .unknown
+        lastResponseMilliseconds = nil
+        lastSuccessfulContact = nil
         message = "تم إلغاء الاقتران"
     }
 
     func refreshCapabilities() async {
-        guard let selected, paired else { return }
+        guard let selected, paired, !checkingConnection else { return }
+        checkingConnection = true
+        connectionState = .checking
+        let started = ProcessInfo.processInfo.systemUptime
+        defer { checkingConnection = false }
         do {
             let response = try await request(endpoint: selected, path: "/v1/info", method: "GET")
+            guard paired, self.selected?.id == selected.id else { return }
+            lastResponseMilliseconds = max(0, Int((ProcessInfo.processInfo.systemUptime - started) * 1000))
+            lastSuccessfulContact = Date()
+            connectionState = .available
             capabilities = RemoteCapabilities(response["capabilities"] as? [String: Any] ?? [:])
             message = "متصل بـ\(response["model"] as? String ?? selected.name)"
         } catch {
+            guard paired, self.selected?.id == selected.id else { return }
+            lastResponseMilliseconds = nil
+            connectionState = .unavailable
             message = "الرسيفر غير متاح الآن"
         }
     }
@@ -122,14 +154,19 @@ final class RemoteStore: ObservableObject {
         await send("OPEN_IPTV_SMARTERS_PRO")
     }
 
-    func send(_ action: String) async {
+    @discardableResult
+    func send(_ action: String) async -> Bool {
         guard paired, let selected, !token.isEmpty else {
             message = "اقرن الآيفون بالرسيفر أولًا"
-            return
+            return false
         }
         do {
             _ = try await request(endpoint: selected, path: "/v1/command", method: "POST",
                                   body: ["action": action], bearer: token)
+            guard paired, self.selected?.id == selected.id else { return false }
+            lastSuccessfulContact = Date()
+            connectionState = .available
+            return true
         } catch RemoteError.unsupported {
             message = "هذه الوظيفة غير مدعومة في نظام الرسيفر الحالي"
         } catch RemoteError.accessibility {
@@ -138,8 +175,11 @@ final class RemoteStore: ObservableObject {
             unpair()
             message = "انتهى الاقتران؛ اربط الآيفون من جديد"
         } catch {
+            connectionState = .unavailable
+            lastResponseMilliseconds = nil
             message = "فشل إرسال الأمر؛ تحقق من اتصال Wi-Fi"
         }
+        return false
     }
 
     private func request(endpoint: ReceiverEndpoint, path: String, method: String,

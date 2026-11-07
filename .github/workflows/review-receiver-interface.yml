@@ -1,12 +1,6 @@
 name: Review Receiver Remote Interface
 
 on:
-  push:
-    branches: [codex/receiver-full-redesign]
-    paths:
-      - 'ReceiverRemote/Sources/**'
-      - 'ReceiverRemote/UITests/**'
-      - 'ReceiverRemote/project.yml'
   workflow_dispatch:
 
 permissions:
@@ -49,7 +43,7 @@ jobs:
           test -d "$APP"
           mkdir -p Screenshots
           xcrun simctl install "$DEVICE_ID" "$APP"
-          for SCREEN in remote numbers connection pairing; do
+          for SCREEN in remote more connection pairing; do
             xcrun simctl terminate "$DEVICE_ID" com.gathin.receiverremote || true
             xcrun simctl launch "$DEVICE_ID" com.gathin.receiverremote "--capture-$SCREEN"
             sleep 3
