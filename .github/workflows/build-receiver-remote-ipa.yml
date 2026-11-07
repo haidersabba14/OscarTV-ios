@@ -2,7 +2,7 @@ name: Build Receiver Remote IPA
 
 on:
   push:
-    branches: [codex/receiver-remote-ipa]
+    branches: [codex/receiver-remote-ipa, codex/receiver-full-redesign]
   workflow_dispatch:
 
 permissions:
@@ -11,9 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -23,23 +23,58 @@ jobs:
         working-directory: ReceiverRemote
         run: |
           set -euo pipefail
-          xcodebuild \
-            -project ReceiverRemote.xcodeproj \
-            -scheme ReceiverRemote \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-          mkdir Payload
+          xcodebuild -project ReceiverRemote.xcodeproj -scheme ReceiverRemote \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build > build-device.log 2>&1 || { tail -100 build-device.log; exit 1; }
+          mkdir -p Payload
           cp -R 'build/DerivedData/Build/Products/Release-iphoneos/Receiver Remote.app' Payload/
           zip -qr Receiver-Remote.ipa Payload
           unzip -t Receiver-Remote.ipa
-          test -f Payload/'Receiver Remote.app'/Info.plist
-      - name: Upload IPA artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Receiver-Remote-IPA
           path: ReceiverRemote/Receiver-Remote.ipa
           if-no-files-found: error
+      - name: Select simulator
+        working-directory: ReceiverRemote
+        run: |
+          xcrun simctl list devices available -j > devices.json
+          DEVICE_ID=$(python3 -c 'import json; d=json.load(open("devices.json")); phones=[x for v in d["devices"].values() for x in v if "iPhone" in x["name"]]; preferred=[x for x in phones if x["name"]=="iPhone 16 Pro"]; print((preferred or phones)[0]["udid"])')
+          echo "DEVICE_ID=$DEVICE_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+          xcrun simctl status_bar "$DEVICE_ID" override --time '9:41' --batteryState charged --batteryLevel 100
+      - name: Build and test redesigned interface
+        working-directory: ReceiverRemote
+        run: |
+          xcodebuild -project ReceiverRemote.xcodeproj -scheme ReceiverRemote \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath build/Simulator -resultBundlePath build/InterfaceTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO test > build-simulator.log 2>&1 || { tail -140 build-simulator.log; exit 1; }
+      - name: Capture real simulator screens
+        if: always()
+        working-directory: ReceiverRemote
+        run: |
+          set -euo pipefail
+          APP='build/Simulator/Build/Products/Debug-iphonesimulator/Receiver Remote.app'
+          test -d "$APP"
+          mkdir -p Screenshots
+          xcrun simctl install "$DEVICE_ID" "$APP"
+          for SCREEN in remote numbers connection pairing; do
+            xcrun simctl terminate "$DEVICE_ID" com.gathin.receiverremote || true
+            xcrun simctl launch "$DEVICE_ID" com.gathin.receiverremote "--capture-$SCREEN"
+            sleep 3
+            xcrun simctl io "$DEVICE_ID" screenshot "Screenshots/$SCREEN.png"
+          done
+      - name: Upload previews and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Receiver-Remote-Review
+          path: |
+            ReceiverRemote/Screenshots
+            ReceiverRemote/build-device.log
+            ReceiverRemote/build-simulator.log
+            ReceiverRemote/build/InterfaceTests.xcresult
+          if-no-files-found: warn

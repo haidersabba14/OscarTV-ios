@@ -30,3 +30,24 @@ targets:
           CODE_SIGNING_ALLOWED: NO
         Release:
           CODE_SIGNING_ALLOWED: YES
+
+  ReceiverRemoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: ReceiverRemote
+    settings:
+      base:
+        TEST_TARGET_NAME: ReceiverRemote
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+schemes:
+  ReceiverRemote:
+    build:
+      targets:
+        ReceiverRemote: all
+        ReceiverRemoteUITests: [test]
+    test:
+      targets: [ReceiverRemoteUITests]
