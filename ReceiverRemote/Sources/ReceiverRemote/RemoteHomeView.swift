@@ -315,19 +315,29 @@ struct RemoteHomeView: View {
 
 private struct GlassCardModifier: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             content
                 .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(LinearGradient(colors: [.white.opacity(0.18), RemotePalette.gold.opacity(0.20), .white.opacity(0.04)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+                .overlay(glassBorder)
         } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(LinearGradient(colors: [.white.opacity(0.18), RemotePalette.gold.opacity(0.20), .white.opacity(0.04)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            fallback(content)
         }
+        #else
+        fallback(content)
+        #endif
+    }
+
+    private var glassBorder: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(LinearGradient(colors: [.white.opacity(0.18), RemotePalette.gold.opacity(0.20), .white.opacity(0.04)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+    }
+
+    private func fallback(_ content: Content) -> some View {
+        content
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(glassBorder)
     }
 }
 
@@ -340,3 +350,4 @@ private struct GlassPressStyle: ButtonStyle {
             .animation(.spring(response: 0.26, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }
+
