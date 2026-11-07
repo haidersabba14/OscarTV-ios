@@ -18,7 +18,17 @@ final class RemoteInterfaceTests: XCTestCase {
         app.buttons["رجوع"].tap()
         XCTAssertEqual(result.label, "BACK")
         app.buttons["الإعدادات"].tap()
-        XCTAssertEqual(result.label, "SETTINGS")
+        XCTAssertEqual(result.label, "OPEN_IPTV_SMARTERS_PRO")
+    }
+
+    @MainActor
+    func testLegacyReceiverShowsIPTVUpdateRequirement() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--capture-remote"]
+        app.launch()
+        XCTAssertTrue(app.buttons["الإعدادات"].waitForExistence(timeout: 10))
+        app.buttons["الإعدادات"].tap()
+        XCTAssertTrue(app.staticTexts["فتح IPTV Smarters Pro يحتاج تحديث خدمة التحكم على الرسيفر"].waitForExistence(timeout: 5))
     }
 
     @MainActor

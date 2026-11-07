@@ -143,7 +143,7 @@ struct RemoteHomeView: View {
                 HStack(spacing: 18) {
                     navigationKey("رجوع", symbol: "arrow.uturn.backward", action: "BACK", enabled: store.capabilities.back)
                     navigationKey("الرئيسية", symbol: "house", action: "HOME", enabled: store.capabilities.home)
-                    navigationKey("الإعدادات", symbol: "gearshape", action: "SETTINGS", enabled: store.capabilities.settings)
+                    navigationKey("الإعدادات", symbol: "gearshape", action: "OPEN_IPTV_SMARTERS_PRO", enabled: store.paired)
                 }
                 Rectangle().fill(.white.opacity(0.09)).frame(height: 1)
                 volumeStrip
@@ -479,7 +479,13 @@ struct RemoteHomeView: View {
         }
         #endif
         #endif
-        Task { await store.send(action) }
+        Task {
+            if action == "OPEN_IPTV_SMARTERS_PRO" {
+                await store.openIPTVSmarters()
+            } else {
+                await store.send(action)
+            }
+        }
     }
 }
 

@@ -11,6 +11,7 @@ struct RemoteCapabilities {
     var volume = false
     var channels = false
     var powerOn = false
+    var openIPTVSmarters = false
 
     init(_ values: [String: Any] = [:]) {
         navigation = values["navigation"] as? Bool ?? false
@@ -21,6 +22,7 @@ struct RemoteCapabilities {
         volume = values["volume"] as? Bool ?? false
         channels = values["channels"] as? Bool ?? false
         powerOn = values["powerOn"] as? Bool ?? false
+        openIPTVSmarters = values["openIPTVSmarters"] as? Bool ?? false
     }
 }
 
@@ -106,6 +108,18 @@ final class RemoteStore: ObservableObject {
         } catch {
             message = "الرسيفر غير متاح الآن"
         }
+    }
+
+    func openIPTVSmarters() async {
+        guard paired else {
+            message = "اقرن الآيفون بالرسيفر أولًا"
+            return
+        }
+        guard capabilities.openIPTVSmarters else {
+            message = "فتح IPTV Smarters Pro يحتاج تحديث خدمة التحكم على الرسيفر"
+            return
+        }
+        await send("OPEN_IPTV_SMARTERS_PRO")
     }
 
     func send(_ action: String) async {
